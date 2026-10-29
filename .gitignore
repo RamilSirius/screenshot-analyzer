@@ -1,0 +1,27 @@
+# секреты
+.env
+client.env
+
+# данные сервера (логи и скриншоты пользователей)
+data/
+
+# питоновские венвы и кэши
+venv/
+.venv/
+Lib/
+Scripts/
+pyvenv.cfg
+__pycache__/
+*.py[cod]
+
+# сборки PyInstaller
+build/
+build_macos/
+dist/
+dist_macos/
+*.manifest
+
+# ОС/редактор
+.DS_Store
+.idea/
+.vscode/
