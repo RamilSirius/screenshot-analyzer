@@ -30,6 +30,7 @@ pyinstaller --onefile ^
     --hidden-import=pynput.mouse._win32 ^
     --hidden-import=pynput._util.win32 ^
     --hidden-import=PIL._tkinter_finder ^
+    --add-data "client.env;." ^
     client.py
 
 echo.

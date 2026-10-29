@@ -5,7 +5,7 @@ a = Analysis(
     ['client.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('client.env', '.')],
     hiddenimports=['pynput.keyboard._win32', 'pynput.mouse._win32', 'pynput._util.win32', 'PIL._tkinter_finder'],
     hookspath=[],
     hooksconfig={},

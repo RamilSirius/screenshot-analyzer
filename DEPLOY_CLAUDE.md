@@ -73,12 +73,17 @@ curl http://СЕРВЕР:8000/stats       # запросы, токены, ско
 
 ## 5. Клиент
 
-В клиенте укажи адрес своего сервера. В `client.py` строка:
-```python
-SERVER_URL = "https://backend-helper-6nmh.onrender.com"
+Клиент один — `client.py` (кроссплатформенный). Адрес сервера он берёт из
+`client.env` (при запуске) и из того же файла, вшитого в сборку. Пропиши там:
 ```
-поменяй на `http://ТВОЙ_VPS:8000` (или домен с https через nginx).
-`client_fixed.py` берёт адрес из `client.env` → поправь там `SERVER_URL`.
+SERVER_URL=http://ТВОЙ_VPS:8000
+```
+(или домен с https, если повесишь nginx).
+
+На macOS при первом запуске выдай разрешения: **Input Monitoring** (для хоткеев)
+и **Screen Recording** (для скриншота) в System Settings → Privacy & Security.
+Для скрытия окна от записи экрана на маке ставится `pyobjc-framework-Cocoa`
+(уже в `requirements.txt`).
 
 ## 6. Деньги ($200 бюджет)
 

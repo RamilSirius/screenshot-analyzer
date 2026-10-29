@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 a = Analysis(
-    ['client_fixed.py'],
+    ['client.py'],
     pathex=[],
     binaries=[],
     datas=[('client.env', '.')],
