@@ -1,14 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
+# Сборка Mac-клиента (client_mac.py) в один .app бандл.
+# Хоткеи через Carbon (RegisterEventHotKey) — Input Monitoring НЕ нужен,
+# нужно только Screen Recording для скриншота (система спросит сама).
 
 a = Analysis(
-    ['client.py'],
+    ['client_mac.py'],
     pathex=[],
     binaries=[],
     datas=[('client.env', '.')],
     hiddenimports=[
-        'pynput.keyboard._darwin',
-        'pynput.mouse._darwin',
-        'pynput._util.darwin',
         'PIL._tkinter_finder',
         'AppKit',
         'Foundation',
@@ -17,7 +17,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['pynput'],
     noarchive=False,
     optimize=0,
 )
@@ -33,7 +33,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -48,7 +48,7 @@ coll = COLLECT(
     a.binaries,
     a.datas,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     name='SystemApp',
 )
@@ -61,7 +61,6 @@ app = BUNDLE(
     info_plist={
         'NSPrincipalClass': 'NSApplication',
         'NSHighResolutionCapable': 'True',
-        'NSInputMonitoringUsageDescription': 'Needed for global hotkeys (Shift+A, Shift+D)',
         'NSScreenCaptureUsageDescription': 'Needed to take screenshots for analysis',
         'LSUIElement': True,
     },

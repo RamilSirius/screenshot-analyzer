@@ -28,7 +28,7 @@ import logging
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from PIL import Image
@@ -42,11 +42,15 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 MODEL_NAME = os.getenv("CLAUDE_MODEL", "claude-opus-5-5")
-EFFORT = os.getenv("CLAUDE_EFFORT", "medium")          # low | medium | high | xhigh | max
+EFFORT = os.getenv("CLAUDE_EFFORT", "medium")          # low | medium | high | xhigh | max | none (none — для моделей без effort, напр. Haiku 4.5)
 MAX_TOKENS = int(os.getenv("CLAUDE_MAX_TOKENS", "2000"))
 MAX_CONCURRENCY = int(os.getenv("MAX_CONCURRENCY", "12"))   # сколько запросов к Claude одновременно
 MAX_IMAGE_EDGE = int(os.getenv("MAX_IMAGE_EDGE", "1568"))   # ресайз длинной стороны перед отправкой (экономия токенов)
 MAX_UPLOAD_MB = float(os.getenv("MAX_UPLOAD_MB", "15"))     # отсекаем слишком большие загрузки
+
+# Токен доступа. Если задан — клиент обязан прислать заголовок X-Auth-Token
+# с этим же значением, иначе 401. Пусто = защита выключена (напр. внутри Tailscale).
+AUTH_TOKEN = os.getenv("AUTH_TOKEN", "").strip()
 
 DATA_DIR = os.getenv("DATA_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"))
 LOG_DIR = os.path.join(DATA_DIR, "logs")
@@ -200,12 +204,16 @@ async def call_claude(b64: str, media_type: str):
         }
     ]
     async with _semaphore:
+        # effort поддерживают не все модели (Haiku 4.5 отвечает 400) — шлём только если задан
+        effort_kwargs = {}
+        if EFFORT and EFFORT.lower() != "none":
+            effort_kwargs["output_config"] = {"effort": EFFORT}
         try:
             return await client.messages.create(
                 model=MODEL_NAME,
                 max_tokens=MAX_TOKENS,
-                output_config={"effort": EFFORT},
                 messages=messages,
+                **effort_kwargs,
             )
         except TypeError:
             # старый SDK без output_config/effort — шлём без него
@@ -218,7 +226,14 @@ async def call_claude(b64: str, media_type: str):
 
 
 @app.post("/analyze")
-async def analyze_screenshot(file: UploadFile = File(...)):
+async def analyze_screenshot(
+    file: UploadFile = File(...),
+    x_auth_token: str | None = Header(default=None),
+):
+    # Проверка токена (если он настроен на сервере)
+    if AUTH_TOKEN and x_auth_token != AUTH_TOKEN:
+        raise HTTPException(status_code=401, detail="Неверный или отсутствующий токен")
+
     req_id = uuid.uuid4().hex[:12]
     t0 = time.monotonic()
     started_at = datetime.now(timezone.utc).isoformat()
