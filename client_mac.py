@@ -67,6 +67,8 @@ logger = logging.getLogger("client_mac")
 HK_CAPTURE = 1
 HK_TOGGLE = 2
 HK_QUIT = 3
+HK_CAPTURE2 = 4
+HK_TOGGLE2 = 5
 
 
 # --------------------------------------------------------------------------
@@ -88,6 +90,7 @@ typeEventHotKeyID = _fourcc("hkid")
 cmdKey, shiftKey, optionKey, controlKey = 0x100, 0x200, 0x800, 0x1000
 # виртуальные коды клавиш (ANSI)
 VK_A, VK_D, VK_Q = 0x00, 0x02, 0x0C
+VK_COMMA, VK_PERIOD = 0x2B, 0x2F
 
 
 class _EventTypeSpec(Structure):
@@ -204,13 +207,46 @@ class Overlay(QMainWindow):
             self.hotkeys.register(HK_CAPTURE, VK_A, mods),
             self.hotkeys.register(HK_TOGGLE, VK_D, mods),
             self.hotkeys.register(HK_QUIT, VK_Q, mods),
+            # без модификаторов: «,» — скриншот, «.» — показать/скрыть окно
+            self.hotkeys.register(HK_CAPTURE2, VK_COMMA, 0),
+            self.hotkeys.register(HK_TOGGLE2, VK_PERIOD, 0),
         ])
         if ok:
             logger.info("✅ Хоткеи зарегистрированы: Shift+A / Shift+D / Shift+Q")
         else:
             logger.error("❌ Не все хоткеи удалось зарегистрировать")
 
+        self._start_mouse_listener()
         QTimer.singleShot(200, self._hide_from_capture)
+
+    # ---- мышь: ПКМ — показать/скрыть, скролл вниз — скриншот ----
+    def _start_mouse_listener(self):
+        try:
+            import time
+            from pynput import mouse
+            last = {"scroll": 0.0, "click": 0.0}
+
+            def on_click(x, y, button, pressed):
+                if pressed and button == mouse.Button.right:
+                    now = time.time()
+                    if now - last["click"] > 0.3:
+                        last["click"] = now
+                        self.sig_toggle.emit()
+
+            def on_scroll(x, y, dx, dy):
+                if dy < 0:
+                    now = time.time()
+                    # скролл шлёт много событий подряд — один скриншот на жест
+                    if now - last["scroll"] > 1.5:
+                        self.sig_capture.emit()
+                    last["scroll"] = now
+
+            self._mouse = mouse.Listener(on_click=on_click, on_scroll=on_scroll)
+            self._mouse.daemon = True
+            self._mouse.start()
+            logger.info("✅ Мышь: ПКМ — окно, скролл вниз — скриншот")
+        except Exception as e:
+            logger.warning(f"⚠️ mouse listener: {e}")
 
     # ---- UI ----
     def _build_ui(self):
@@ -227,28 +263,45 @@ class Overlay(QMainWindow):
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        # в узком окне скроллбары со стрелками не нужны
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet(
-            "QScrollArea{background:rgba(10,10,15,150);border:none;border-radius:12px;}"
+            "QScrollArea{background:transparent;border:none;border-radius:12px;}"
             "QScrollBar:vertical{background:transparent;width:6px;}"
             "QScrollBar::handle:vertical{background:rgba(150,150,150,120);border-radius:3px;}"
         )
         self.text = QTextEdit("Готов. Shift+A — скриншот.")
         self.text.setReadOnly(True)
+        self.text.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.text.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.text.setStyleSheet(
-            "QTextEdit{background:transparent;color:#fff;padding:18px;"
+            "QTextEdit{background:transparent;color:#fff;padding:6px 2px 6px 2px;"
             "font-size:14px;border:none;}"
         )
         f = QFont()
         f.setFamilies(["San Francisco", "Helvetica", "Arial"])
         f.setPointSize(13)
         self.text.setFont(f)
+        # тёмный контур вокруг текста — читается на любом фоне
+        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+        from PyQt6.QtGui import QColor
+        shadow = QGraphicsDropShadowEffect(self.text)
+        shadow.setBlurRadius(6)
+        shadow.setOffset(0, 0)
+        shadow.setColor(QColor(0, 0, 0, 255))
+        self.text.setGraphicsEffect(shadow)
+        f.setWeight(QFont.Weight.DemiBold)
+        self.text.setFont(f)
         scroll.setWidget(self.text)
         layout.addWidget(scroll)
         self.setCentralWidget(central)
 
         screen = QApplication.primaryScreen().geometry()
-        self.resize(420, 280)
-        self.move(screen.width() - 440, screen.height() - 320)
+        # узкая полоска у правого края — справа от вебки
+        self.setMinimumWidth(0)
+        self.resize(40, 220)
+        self.move(screen.width() - 40, screen.height() - 220)
 
     def _hide_from_capture(self, bring_front: bool = False):
         """Скрыть от записи экрана + показывать поверх полноэкранных приложений."""
@@ -265,6 +318,8 @@ class Overlay(QMainWindow):
                 return
             # не попадает в скриншоты и запись экрана
             ns_win.setSharingType_(0)
+            # без системной анимации появления/исчезновения (2 = None)
+            ns_win.setAnimationBehavior_(2)
             # выше всего, включая нативный fullscreen других приложений
             ns_win.setLevel_(NSScreenSaverWindowLevel)
             # присутствовать во всех Spaces и поверх fullscreen-окон
@@ -285,10 +340,10 @@ class Overlay(QMainWindow):
 
     # ---- хоткеи (вызывается из Carbon-callback на главном потоке) ----
     def _on_hotkey(self, hk_id: int):
-        if hk_id == HK_CAPTURE:
+        if hk_id in (HK_CAPTURE, HK_CAPTURE2):
             logger.info("🎯 Shift+A")
             self.sig_capture.emit()
-        elif hk_id == HK_TOGGLE:
+        elif hk_id in (HK_TOGGLE, HK_TOGGLE2):
             logger.info("🎯 Shift+D")
             self.sig_toggle.emit()
         elif hk_id == HK_QUIT:
@@ -320,7 +375,7 @@ class Overlay(QMainWindow):
                     True,
                 )
                 return
-            self._set_text("⏳ Анализирую...", False)
+            self._set_text("Анализирую...", False)
             self.worker = ScreenshotWorker(data)
             self.worker.finished.connect(self._on_response, Qt.ConnectionType.QueuedConnection)
             self.worker.start()
@@ -334,7 +389,7 @@ class Overlay(QMainWindow):
     def _on_response(self, result: dict):
         # Окно само НЕ открывается — ответ готовится молча, смотреть по Shift+D.
         if result.get("success"):
-            self.sig_text.emit(f"✅ Ответ:\n\n{result.get('answer', '—')}", False)
+            self.sig_text.emit(result.get('answer', '—'), False)
             logger.info("✅ Ответ получен (Shift+D — показать)")
         else:
             self.sig_text.emit(f"❌ Ошибка: {result.get('error', '—')}", False)
@@ -344,7 +399,7 @@ class Overlay(QMainWindow):
     def _set_text(self, text: str, show_window: bool):
         import re
         html = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text).replace("\n", "<br>")
-        self.text.setHtml(f'<div style="color:#fff;font-size:13px;">{html}</div>')
+        self.text.setHtml(f'<div style="color:#fff;font-size:13px;font-weight:600;">{html}</div>')
         if show_window:
             self._show_overlay()
 

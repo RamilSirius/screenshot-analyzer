@@ -151,7 +151,7 @@ class OverlayWindow(QMainWindow):
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("""
             QScrollArea {
-                background: rgba(10, 10, 15, 80);
+                background: transparent;
                 border: none;
                 border-radius: 12px;
             }
@@ -167,7 +167,7 @@ class OverlayWindow(QMainWindow):
         """)
 
         # Текстовое поле с поддержкой markdown
-        self.text_edit = QTextEdit("⏳ Загрузка...")
+        self.text_edit = QTextEdit("")
         self.text_edit.setReadOnly(True)
         self.text_edit.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         self.text_edit.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse | Qt.TextInteractionFlag.LinksAccessibleByMouse)
@@ -194,8 +194,8 @@ class OverlayWindow(QMainWindow):
 
         # Позиция - правый нижний угол
         screen = QApplication.primaryScreen().geometry()
-        self.resize(500, 350)
-        self.move(screen.width() - 520, screen.height() - 420)
+        self.resize(380, 250)
+        self.move(screen.width() - 340, screen.height() - 300)
 
         if sys.platform == 'win32':
             QTimer.singleShot(100, self.setup_window_properties)
@@ -394,7 +394,7 @@ class OverlayWindow(QMainWindow):
             self._save_screenshot(image_bytes)
 
             # Сохраняем ответ без показа окна — юзер сам откроет через Shift+D
-            self._update_text("⏳ Анализирую скриншот...")
+            self._update_text("Анализирую...")
 
             # Отправляем в фоновом потоке
             # Проверяем, не идёт ли уже другой запрос
@@ -421,7 +421,7 @@ class OverlayWindow(QMainWindow):
         """Обработка ответа от сервера — обновляем текст, но НЕ показываем окно"""
         if result.get("success"):
             answer = result.get("answer", "Нет ответа")
-            self._update_text(f"✅ Ответ:\n\n{answer}")
+            self._update_text(answer)
             logger.info("✅ Ответ получен. Нажми Shift+D чтобы посмотреть")
         else:
             error = result.get("error", "Неизвестная ошибка")

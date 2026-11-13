@@ -105,12 +105,45 @@ class Overlay(QMainWindow):
             "<shift>+a": lambda: self.sig_capture.emit(),
             "<shift>+d": lambda: self.sig_toggle.emit(),
             "<shift>+q": lambda: self.sig_quit.emit(),
+            # без модификаторов: «,» — скриншот, «.» — показать/скрыть окно
+            ",": lambda: self.sig_capture.emit(),
+            ".": lambda: self.sig_toggle.emit(),
         })
         self.listener.daemon = True
         self.listener.start()
-        logger.info("✅ Хоткеи зарегистрированы: Shift+A / Shift+D / Shift+Q")
+        logger.info("✅ Хоткеи зарегистрированы: Shift+A / Shift+D / Shift+Q / , / .")
+        self._start_mouse_listener()
 
         QTimer.singleShot(200, self._hide_from_capture)
+
+    # ---- мышь: ПКМ — показать/скрыть, скролл вниз — скриншот ----
+    def _start_mouse_listener(self):
+        try:
+            import time
+            from pynput import mouse
+            last = {"scroll": 0.0, "click": 0.0}
+
+            def on_click(x, y, button, pressed):
+                if pressed and button == mouse.Button.right:
+                    now = time.time()
+                    if now - last["click"] > 0.3:
+                        last["click"] = now
+                        self.sig_toggle.emit()
+
+            def on_scroll(x, y, dx, dy):
+                if dy < 0:
+                    now = time.time()
+                    # скролл шлёт много событий подряд — один скриншот на жест
+                    if now - last["scroll"] > 1.5:
+                        self.sig_capture.emit()
+                    last["scroll"] = now
+
+            self._mouse = mouse.Listener(on_click=on_click, on_scroll=on_scroll)
+            self._mouse.daemon = True
+            self._mouse.start()
+            logger.info("✅ Мышь: ПКМ — окно, скролл вниз — скриншот")
+        except Exception as e:
+            logger.warning(f"⚠️ mouse listener: {e}")
 
     # ---- UI ----
     def _build_ui(self):
@@ -129,28 +162,44 @@ class Overlay(QMainWindow):
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet(
-            "QScrollArea{background:rgba(10,10,15,150);border:none;border-radius:12px;}"
+            "QScrollArea{background:transparent;border:none;border-radius:12px;}"
             "QScrollBar:vertical{background:transparent;width:6px;}"
             "QScrollBar::handle:vertical{background:rgba(150,150,150,120);border-radius:3px;}"
         )
         self.text = QTextEdit("Готов. Shift+A — скриншот.")
         self.text.setReadOnly(True)
+        self.text.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.text.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.text.setStyleSheet(
-            "QTextEdit{background:transparent;color:#fff;padding:18px;"
+            "QTextEdit{background:transparent;color:#fff;padding:6px 2px 6px 2px;"
             "font-size:14px;border:none;}"
         )
         f = QFont()
         f.setFamilies(["Segoe UI", "Arial"])
         f.setPointSize(11)
         self.text.setFont(f)
+        # тёмный контур вокруг текста — читается на любом фоне
+        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+        from PyQt6.QtGui import QColor
+        shadow = QGraphicsDropShadowEffect(self.text)
+        shadow.setBlurRadius(6)
+        shadow.setOffset(0, 0)
+        shadow.setColor(QColor(0, 0, 0, 255))
+        self.text.setGraphicsEffect(shadow)
+        f.setWeight(QFont.Weight.DemiBold)
+        self.text.setFont(f)
         scroll.setWidget(self.text)
         layout.addWidget(scroll)
         self.setCentralWidget(central)
 
         screen = QApplication.primaryScreen().geometry()
-        self.resize(420, 280)
-        self.move(screen.width() - 440, screen.height() - 320)
+        # узкая полоска у правого края — справа от вебки
+        self.setMinimumWidth(0)
+        self.resize(40, 220)
+        self.move(screen.width() - 40, screen.height() - 220)
 
     def _hide_from_capture(self):
         """WDA_EXCLUDEFROMCAPTURE — окно не попадает в скриншоты и запись экрана."""
@@ -181,7 +230,7 @@ class Overlay(QMainWindow):
             buf = io.BytesIO()
             shot.save(buf, format="PNG")
             data = buf.getvalue()
-            self._set_text("⏳ Анализирую...", False)
+            self._set_text("Анализирую...", False)
             self.worker = ScreenshotWorker(data)
             self.worker.finished.connect(self._on_response, Qt.ConnectionType.QueuedConnection)
             self.worker.start()
@@ -192,7 +241,7 @@ class Overlay(QMainWindow):
     def _on_response(self, result: dict):
         # Окно само НЕ открывается — ответ готовится молча, смотреть по Shift+D.
         if result.get("success"):
-            self.sig_text.emit(f"✅ Ответ:\n\n{result.get('answer', '—')}", False)
+            self.sig_text.emit(result.get('answer', '—'), False)
             logger.info("✅ Ответ получен (Shift+D — показать)")
         else:
             self.sig_text.emit(f"❌ Ошибка: {result.get('error', '—')}", False)
@@ -202,7 +251,7 @@ class Overlay(QMainWindow):
     def _set_text(self, text: str, show_window: bool):
         import re
         html = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text).replace("\n", "<br>")
-        self.text.setHtml(f'<div style="color:#fff;font-size:13px;">{html}</div>')
+        self.text.setHtml(f'<div style="color:#fff;font-size:13px;font-weight:600;">{html}</div>')
         if show_window:
             self.show()
             self.raise_()
@@ -219,6 +268,7 @@ class Overlay(QMainWindow):
     def closeEvent(self, event):
         try:
             self.listener.stop()
+            self._mouse.stop()
         except Exception:
             pass
         super().closeEvent(event)
